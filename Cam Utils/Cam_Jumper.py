@@ -1,7 +1,7 @@
 import bpy
-from bpy.types import Operator, Panel, Object, Camera, Keyframe
+from bpy.types import Operator, Panel, Object, Camera, Keyframe, FCurve
 
-from bpy.props import FloatProperty, IntProperty, BoolProperty
+from bpy.props import FloatProperty, IntProperty, BoolProperty, EnumProperty
 
 ## To enable, run from text editor ##
 
@@ -23,6 +23,16 @@ class XWH_Cam_OT_Fix_Jumps(Operator):
     bl_label = "Fix Camera Jumps"
     bl_description = "Fixes camera jumps being screwed up by scaling animation"
     bl_options = {"REGISTER", "UNDO"}
+
+    op_mode: EnumProperty(      #type: ignore
+        name= "Mode",
+        description="",
+        items=[
+            ('FCURVE', "Fcurve", "Treats fcurves individually"),
+            ('OBJECT', "Object", "Checks for jumps at all fcurves of an object at the same time")
+        ],
+        default= 'OBJECT'
+    )
 
     use_trans: BoolProperty(    #type: ignore
         name="Translation",
@@ -105,12 +115,30 @@ class XWH_Cam_OT_Fix_Jumps(Operator):
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self,
-                width=200,
+                width=250,
                 title="Fix Camera Jumps",
                 )
 
     def draw(self, context):
         layout = self.layout
+
+        layout.label(text="Affected Curves")
+        row1 = layout.row()
+        row1.emboss = 'PIE_MENU'
+        row1.alignment = 'CENTER'
+        row1.prop(self, 'use_trans')
+        row1.prop(self, 'use_rot')
+        row1.prop(self, 'use_scale')
+        row2 = layout.row()
+        row2.emboss = 'PIE_MENU'
+        row2.alignment = 'CENTER'
+        row2.prop(self, 'use_cam')
+        row2.prop(self, 'use_other')
+
+        layout.separator()
+        layout.prop(self, 'op_mode')
+
+        layout.label(text="Sensitivity")
         layout.prop(self, "trns_threshold")
         layout.prop(self, "rot_threshold")
         layout.prop(self, "frame_threshold")
@@ -118,9 +146,10 @@ class XWH_Cam_OT_Fix_Jumps(Operator):
 
         layout.separator()
 
-        layout.prop(self, 'make_constant')
+        layout.label(text= "Configuration")
         layout.prop(self, 'min_keys')
         layout.prop(self, 'max_keys')
+        layout.prop(self, 'make_constant')
 
     def execute(self, context):
         def get_rate(k1:Keyframe, k2:Keyframe) -> float:
@@ -217,37 +246,83 @@ class XWH_Cam_OT_Fix_Jumps(Operator):
             channelbag = getChannelbag(obj)
             if not channelbag: continue
 
-            ## Transforms ##
-            for transform in ('location', 'rotation_euler', 'scale'):
-                if transform in ('rotation_euler', 'quaternion'):
-                    threshold = self.rot_threshold
-                else:
-                    threshold = self.trns_threshold
+            trans_list:list[str] = []
+            if self.use_trans: trans_list.append('location')
+            if self.use_rot: 
+                trans_list.append('rotation_euler')
+                trans_list.append('quaternion')
+            if self.use_scale: trans_list.append('scale')
 
+            #Build list with all fcurves to operate
+            fcurve_list:list[tuple[FCurve, float]] = []       #Each fcurve is saved with the tolerance threshold it will use
+            for transform in trans_list:
                 for i in range(3):
-                    fcurve:bpy.types.FCurve = channelbag.fcurves.find(transform, index=i)
+                    fcurve = channelbag.fcurves.find(transform, index=i)
                     if not fcurve: continue
 
-                    unjump_fcurve(fcurve, threshold)
+                    if transform in ('rotation_euler', 'quaternion'):
+                        threshold = self.rot_threshold
+                    else:
+                        threshold = self.trns_threshold
 
-                    corrected += 1
+                    fcurve_list.append((fcurve, threshold))
 
-            #Case camera
+            #Treat camera differently
             if obj.type == 'CAMERA':
                 #A3DA FOV
                 fcurve = channelbag.fcurves.find('auth3d_cam.fov')
                 if fcurve:
-                    unjump_fcurve(fcurve, self.rot_threshold)
-                    corrected += 1
+                    fcurve_list.append((fcurve, self.rot_threshold))
+                    
 
                 cam_channelbag = getChannelbag(obj.data)
-                if not cam_channelbag: continue
+                if cam_channelbag: 
+                    fcurve = cam_channelbag.fcurves.find('lens')
+                    if fcurve: fcurve_list.append((fcurve, self.trns_threshold))
 
-                #Focal length
-                fcurve = cam_channelbag.fcurves.find('lens')
-                if fcurve:
-                    unjump_fcurve(fcurve, self.trns_threshold)
-                    corrected += 1
+            ## Transforms ##
+            #for transform in ('location', 'rotation_euler', 'scale'):
+            #    if transform in ('rotation_euler', 'quaternion'):
+            #        threshold = self.rot_threshold
+            #    else:
+            #        threshold = self.trns_threshold
+#
+            #    for i in range(3):
+            #        fcurve:bpy.types.FCurve = channelbag.fcurves.find(transform, index=i)
+            #        if not fcurve: continue
+#
+            #        unjump_fcurve(fcurve, threshold)
+#
+            #        corrected += 1
+
+            #Case camera
+            #if obj.type == 'CAMERA':
+            #    #A3DA FOV
+            #    fcurve = channelbag.fcurves.find('auth3d_cam.fov')
+            #    if fcurve:
+            #        unjump_fcurve(fcurve, self.rot_threshold)
+            #        corrected += 1
+#
+            #    cam_channelbag = getChannelbag(obj.data)
+            #    if not cam_channelbag: continue
+#
+            #    #Focal length
+            #    fcurve = cam_channelbag.fcurves.find('lens')
+            #    if fcurve:
+            #        unjump_fcurve(fcurve, self.trns_threshold)
+            #        corrected += 1
+
+            #########################
+            #### Operate Fcurves ####
+            #########################
+            if self.op_mode == 'FCURVE':
+                for fc_set in fcurve_list:
+                    unjump_fcurve(fc_set[0], fc_set[1])
+
+            elif self.op_mode == 'OBJECT':
+
+                pass
+
 
 
         self.report({'INFO'}, f"Fixed {corrected} fcurves")
