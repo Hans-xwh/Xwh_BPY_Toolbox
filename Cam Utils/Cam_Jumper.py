@@ -29,7 +29,8 @@ class XWH_Cam_OT_Fix_Jumps(Operator):
         description="",
         items=[
             ('FCURVE', "Fcurve", "Treats fcurves individually"),
-            ('OBJECT', "Object", "Checks for jumps at all fcurves of an object at the same time")
+            ('OBJECT', "Object", "Checks for jumps at all fcurves of an object at the same time"),
+            ('ABSOLUTE', "Abosolute", "Checks all fcurves of all objects at the same time")
         ],
         default= 'OBJECT'
     )
@@ -109,6 +110,13 @@ class XWH_Cam_OT_Fix_Jumps(Operator):
         default= 10
     )
 
+    min_matches:IntProperty(    #type:ignore
+        name="Minimum Coincidences",
+        description="",
+        min=2,
+        default=2
+    )
+
     @classmethod
     def poll(cls, context):
         return context.mode == 'OBJECT' and context.active_object
@@ -149,6 +157,7 @@ class XWH_Cam_OT_Fix_Jumps(Operator):
         layout.label(text= "Configuration")
         layout.prop(self, 'min_keys')
         layout.prop(self, 'max_keys')
+        if self.op_mode != 'FCURVE': layout.prop(self, 'min_matches')
         layout.prop(self, 'make_constant')
 
     def execute(self, context):
@@ -239,7 +248,90 @@ class XWH_Cam_OT_Fix_Jumps(Operator):
             fcurve.update()
             return
 
+        def unjump_object_baked(fcurve_list:list[tuple[FCurve, float]]):
+            min_rate = self.min_keys
+            max_rate = self.max_keys
+            min_votes = self.min_matches
+
+            if min_rate > max_rate: max_rate = min_rate + 2
+            if min_votes > len(fcurve_list): min_votes = len(fcurve_list)
+
+            frame_count = min(len(fc.keyframe_points) for (fc,_) in fcurve_list)
+            rates:list[list[float]] = [[] for _ in fcurve_list]              #Matrix to store rates of change of all fcurves
+
+            #Iterate trough frames of all fcurves at the same time
+            for frame in range(frame_count - 1):
+                jump_detected:list[bool] = [False] * len(fcurve_list)       #Stores detection state for each fcurve
+                change_rate_cache:list[float] = [None] * len(fcurve_list)   #Stores current rate for each fcurve
+
+                #Iterate trough all fcurves on the same frame
+                for idx, curve_set in enumerate(fcurve_list):
+                    fcurve = curve_set[0]
+                    threshold = curve_set[1]
+
+                    key1:Keyframe = fcurve.keyframe_points[frame]
+                    key2:Keyframe = fcurve.keyframe_points[frame+1]
+
+                    if (key1.co.x == key2.co.x): continue
+
+                    change_rate = get_rate(key1, key2)
+                    change_rate_cache[idx] = change_rate
+
+                    #Build min ammount of rates
+                    if len(rates[idx]) < min_rate:
+                        rates[idx].append(change_rate)
+                        continue
+
+                    avg_rate = get_avg(rates[idx])
+                    dynamic_threshold = threshold + (abs(avg_rate) * self.curve_tolerance)
+
+                    if abs(change_rate - avg_rate) < dynamic_threshold:  #Case OK
+                        rates[idx].append(change_rate)
+                        if len(rates[idx]) > max_rate: rates[idx].pop(0)
+                    else:                                              #Case nono, but only for this curve so far
+                        jump_detected[idx] = True
+
+                #### Only correct once enough curves agree its a real jump ####
+                votes = jump_detected.count(True)
+
+                if votes >= min_votes:      #Case: Jump detected
+                    for idx, curve_set in enumerate(fcurve_list):   #Now apply correction on the fcurves
+                        fcurve = curve_set[0]
+                        threshold = curve_set[1]
+
+                        key1:Keyframe = fcurve.keyframe_points[frame]
+                        key2:Keyframe = fcurve.keyframe_points[frame+1]
+
+                        if key1.co.x == key2.co.x: continue
+
+                        key1.co.x = key2.co.x - self.frame_threshold    #Move key
+                        if self.make_constant: key1.interpolation = "CONSTANT"
+
+                        #Ensure handles are ok
+                        key0 = fcurve.keyframe_points[frame-1] if frame > 0 else None
+                        key3 = fcurve.keyframe_points[frame+2] if frame+2 < len(fcurve.keyframe_points) else None
+
+                        fix_handles(key1, key0, key2)
+                        fix_handles(key2, key1, key3)
+
+                        if key0:
+                            key0_prev = fcurve.keyframe_points[frame-2] if frame > 1 else None
+                            fix_handles(key0, key0_prev, key1)
+
+                        rates[idx].clear()
+
+                else:       #Case: Not enough agreement
+                    for idx, flagged in enumerate(jump_detected):
+                        if flagged:
+                            rates[idx].append(change_rate_cache[idx])
+                            if len(rates[idx]) > max_rate: rates[idx].pop(0)
+
+
+            #And finally update all fcurves
+            for fcurve, _ in fcurve_list: fcurve.update()
+            return 
 ##################################################
+        absolute_list:list[tuple[FCurve, float]] = []
         corrected = 0
 
         for obj in context.selected_objects:
@@ -268,49 +360,16 @@ class XWH_Cam_OT_Fix_Jumps(Operator):
                     fcurve_list.append((fcurve, threshold))
 
             #Treat camera differently
-            if obj.type == 'CAMERA':
+            if obj.type == 'CAMERA' and self.use_cam:
                 #A3DA FOV
                 fcurve = channelbag.fcurves.find('auth3d_cam.fov')
                 if fcurve:
                     fcurve_list.append((fcurve, self.rot_threshold))
-                    
 
                 cam_channelbag = getChannelbag(obj.data)
                 if cam_channelbag: 
                     fcurve = cam_channelbag.fcurves.find('lens')
                     if fcurve: fcurve_list.append((fcurve, self.trns_threshold))
-
-            ## Transforms ##
-            #for transform in ('location', 'rotation_euler', 'scale'):
-            #    if transform in ('rotation_euler', 'quaternion'):
-            #        threshold = self.rot_threshold
-            #    else:
-            #        threshold = self.trns_threshold
-#
-            #    for i in range(3):
-            #        fcurve:bpy.types.FCurve = channelbag.fcurves.find(transform, index=i)
-            #        if not fcurve: continue
-#
-            #        unjump_fcurve(fcurve, threshold)
-#
-            #        corrected += 1
-
-            #Case camera
-            #if obj.type == 'CAMERA':
-            #    #A3DA FOV
-            #    fcurve = channelbag.fcurves.find('auth3d_cam.fov')
-            #    if fcurve:
-            #        unjump_fcurve(fcurve, self.rot_threshold)
-            #        corrected += 1
-#
-            #    cam_channelbag = getChannelbag(obj.data)
-            #    if not cam_channelbag: continue
-#
-            #    #Focal length
-            #    fcurve = cam_channelbag.fcurves.find('lens')
-            #    if fcurve:
-            #        unjump_fcurve(fcurve, self.trns_threshold)
-            #        corrected += 1
 
             #########################
             #### Operate Fcurves ####
@@ -320,10 +379,13 @@ class XWH_Cam_OT_Fix_Jumps(Operator):
                     unjump_fcurve(fc_set[0], fc_set[1])
 
             elif self.op_mode == 'OBJECT':
+                unjump_object_baked(fcurve_list)
 
-                pass
+            elif self.op_mode == 'ABSOLUTE':
+                absolute_list.extend(fcurve_list)
 
-
+        if self.op_mode == 'ABSOLUTE':
+            unjump_object_baked(absolute_list)
 
         self.report({'INFO'}, f"Fixed {corrected} fcurves")
         return {'FINISHED'}
