@@ -30,9 +30,9 @@ class XWH_Cam_OT_Fix_Jumps(Operator):
         items=[
             ('FCURVE', "Fcurve", "Treats fcurves individually"),
             ('OBJECT', "Object", "Checks for jumps at all fcurves of an object at the same time"),
-            ('ABSOLUTE', "Abosolute", "Checks all fcurves of all objects at the same time")
+            ('ABSOLUTE', "Abosolute", "Best acuracy for baked motions. Checks all fcurves of all objects at the same time")
         ],
-        default= 'OBJECT'
+        default= 'ABSOLUTE'
     )
 
     use_trans: BoolProperty(    #type: ignore
@@ -62,7 +62,7 @@ class XWH_Cam_OT_Fix_Jumps(Operator):
 
     trns_threshold: FloatProperty(      #type: ignore
         name="Distance Sensitive",
-        default=1,
+        default=0.5,
         min=0.0,
         subtype='DISTANCE'
     )
@@ -85,7 +85,7 @@ class XWH_Cam_OT_Fix_Jumps(Operator):
     curve_tolerance: FloatProperty( #type: ignore
         name = "Curve tolerance",
         description= "Forgiveness on acceleration, like an elasticity factor. Higher values makes the algorithm more strict on changes, and prone to false positives",
-        default= 2.0,
+        default= 3.0,
         min= 0.1,
         max= 10
     )
