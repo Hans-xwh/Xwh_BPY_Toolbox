@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Hans_Xwh - Licensed under the MIT license.
+
 import bpy
 import csv
 import pathlib

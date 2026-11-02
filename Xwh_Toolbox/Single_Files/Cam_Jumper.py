@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Hans_Xwh - Licensed under the MIT license.
+
 import bpy
 from bpy.types import Operator, Panel, Object, Camera, Keyframe, FCurve
 

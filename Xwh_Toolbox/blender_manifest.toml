@@ -6,7 +6,7 @@ version = "0.0.0"
 blender_version_min = "4.5.0"
 
 tagline = "Personal toolbox of silly scripts"
-maintainer = "Hans Xwh"
+maintainer = "Hans_Xwh"
 type = "add-on"
 license = ["SPDX:MIT"]
 copyright = ["2026 Hans_Xwh"]

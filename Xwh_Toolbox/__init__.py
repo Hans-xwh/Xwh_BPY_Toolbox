@@ -1,4 +1,4 @@
-# Copyright (C) 2026 Hans_Xwh - Licensed under GPL v3.
+# Copyright (C) 2026 Hans_Xwh - Licensed under the MIT license.
 
 from . import Single_Files
 from . import Table_Renamer
