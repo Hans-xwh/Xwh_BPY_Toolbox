@@ -7,7 +7,7 @@ from bpy.props import FloatProperty, IntProperty, BoolProperty, EnumProperty
 
 ### Stuff stolen from a3da parser ###
 def getChannelbag(target:bpy.types.ID, anim_data:bpy.types.AnimData|None=None, ensure=False) -> bpy.types.ActionChannelbag | None: #Should work on anything
-    if anim_data is None:
+    if anim_data is None and target is not None:
         anim_data = target.animation_data
     if not anim_data: return None
 
@@ -396,7 +396,7 @@ class XWH_PT_Cam_Fix_Jumps(Panel):
     bl_idname = "XWH_PT_Cam_Fix_Jumps"
     bl_space_type = "VIEW_3D"
     bl_region_type = 'UI'
-    bl_category = 'XWH'
+    bl_category = 'Xwh'
 
     def draw(self, context):
         layout = self.layout
@@ -425,4 +425,5 @@ def unregister():
 
 # Run from Blender's text editor
 if __name__ == "<run_path>" or __name__ == '__main__':
+    print("Registering as single file...")
     register()

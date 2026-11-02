@@ -1,0 +1,21 @@
+schema_version = "1.0.0"
+
+id = "xwh_toolbox"
+name = "XWH's Toolbox"
+version = "0.0.0"
+blender_version_min = "4.5.0"
+
+tagline = "Personal toolbox of silly scripts"
+maintainer = "Hans Xwh"
+type = "add-on"
+license = ["SPDX:MIT"]
+copyright = ["2026 Hans_Xwh"]
+
+website = "https://github.com/Hans-xwh/"
+
+[build]
+paths_exclude_pattern = [
+    "__pycache__/",
+    "changelog.md",
+    "*.old"
+]
